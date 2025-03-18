@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Data Exporter</title>
+    <style>
+        body {
+            background-color: #111;
+            color: white;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+        }
+
+        h1 {
+            margin-top: 50px;
+            font-size: 2em;
+        }
+
+        p {
+            font-size: 1.2em;
+        }
+
+        .form-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .form-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            width: 100%;
+        }
+
+        label {
+            font-size: 1em;
+            text-align: left;
+            color: white;
+            width: 150px;
+        }
+
+        input {
+            padding: 10px;
+            font-size: 1em;
+            border-radius: 5px;
+            border: none;
+            background-color: #333;
+            color: white;
+            outline: none;
+            width: 250px;
+        }
+
+        input:disabled {
+            background-color: #555;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1.1em;
+            background-color: #333;
+            color: white;
+            border-radius: 5px;
+            border: none;
+            outline: none;
+        }
+
+        button:disabled {
+            background-color: #555;
+        }
+
+        #loading {
+            display: none;
+            font-size: 1.2em;
+            color: #ff6347;
+            margin-top: 20px;
+        }
+
+        #message {
+            display: none;
+            font-size: 1.2em;
+            margin-top: 20px;
+        }
+
+        #message.success {
+            color: #32CD32; /* Green for success */
+        }
+
+        #message.error {
+            color: #ff6347; /* Red for error */
+        }
+
+        #getGithubTokenLink {
+            color: #ff6347;
+            text-decoration: none;
+            font-size: 1em;
+            margin-top: 20px;
+            display: block;
+        }
+
+        .download-btn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1.1em;
+            background-color: #333;
+            color: white;
+            border-radius: 5px;
+            border: none;
+            outline: none;
+            display: none;
+        }
+
+        .action-btns {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .reset-btn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1.1em;
+            background-color: #333;
+            color: white;
+            border-radius: 5px;
+            border: none;
+            outline: none;
+        }
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.7.1/dist/jszip.min.js"></script>
+</head>
+<body>
+
+    <h1>GitHub Data Exporter</h1>
+
+    <p>Enter your GitHub username and token to export their followers, following, repositories, starred repositories, gists, and starred gists as CSV files.</p>
+    <br><br>
+
+    <div class="form-container">
+
+        <div class="form-row">
+            <label for="username">GitHub Username:</label>
+            <input type="text" id="username" placeholder="Enter GitHub username" autofocus />
+        </div>
+
+        <div class="form-row">
+            <label for="token">GitHub Personal Access Token:</label>
+            <input type="text" id="token" placeholder="Enter GitHub token" />
+        </div>
+
+        <a href="https://github.com/settings/tokens" id="getGithubTokenLink" target="_blank">Get GitHub Token</a>
+
+        <div class="action-btns">
+            <button id="getDataButton">Get Data</button>
+            <button class="reset-btn" id="resetButton">Reset</button>
+        </div>
+
+        <div id="message"></div>
+        <div id="loading">Loading data, please wait...</div>
+
+        <button class="download-btn" id="downloadCsvButton">Download CSV Files</button>
+
+    </div>
+
+    <script>
+        async function fetchGitHubData(username, token) {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('message').style.display = 'none';
+
+                document.getElementById('username').disabled = true;
+                document.getElementById('token').disabled = true;
+                document.getElementById('getDataButton').disabled = true;
+
+                // Hide the download button before fetching new data
+                document.getElementById('downloadCsvButton').style.display = 'none';
+
+                const stars = await fetchPaginatedData(`https://api.github.com/users/${username}/starred`, token);
+                const follows = await fetchPaginatedData(`https://api.github.com/users/${username}/followers`, token);
+                const following = await fetchPaginatedData(`https://api.github.com/users/${username}/following`, token);
+                const repos = await fetchPaginatedData(`https://api.github.com/users/${username}/repos`, token);
+                const gists = await fetchPaginatedData(`https://api.github.com/users/${username}/gists`, token);
+                const starredGists = await fetchStarredGists(token);
+
+                showMessage('Data fetched successfully!', 'success');
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('downloadCsvButton').style.display = 'inline-block';
+
+                window.githubData = { stars, follows, following, repos, gists, starredGists, username };
+
+            } catch (error) {
+                showMessage('Failed to fetch GitHub data. Please check your token and username, and try again.', 'error');
+                console.error('Error fetching GitHub data:', error);
+            } finally {
+                document.getElementById('username').disabled = false;
+                document.getElementById('token').disabled = false;
+                document.getElementById('getDataButton').disabled = false;
+            }
+        }
+
+        async function fetchStarredGists(token) {
+            let starredGists = [];
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore) {
+                const response = await fetch(`https://api.github.com/gists/starred?page=${page}&per_page=100`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch starred gists');
+                }
+
+                const pageData = await response.json();
+
+                if (pageData.length > 0) {
+                    starredGists = [...starredGists, ...pageData];
+                    page++;
+                } else {
+                    hasMore = false;
+                }
+            }
+
+            return starredGists;
+        }
+
+        async function fetchPaginatedData(url, token) {
+            let data = [];
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore) {
+                const response = await fetch(`${url}?page=${page}&per_page=100`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch data');
+                }
+
+                const pageData = await response.json();
+
+                if (pageData.length > 0) {
+                    data = [...data, ...pageData];
+                    page++;
+                } else {
+                    hasMore = false;
+                }
+            }
+
+            return data;
+        }
+
+        function convertToCSV(data) {
+            const keys = Object.keys(data[0]);
+            const csv = [
+                keys.join(','), 
+                ...data.map(row => keys.map(key => `"${row[key]}"`).join(','))
+            ].join('\n');
+
+            return csv;
+        }
+
+        function downloadZIP(data, username) {
+            const zip = new JSZip();
+            const folder = zip.folder(`github_data_${username}`);
+
+            folder.file(`github_starredrepositories_${username}.csv`, convertToCSV(data.stars));
+            folder.file(`github_following_${username}.csv`, convertToCSV(data.following));
+            folder.file(`github_followers_${username}.csv`, convertToCSV(data.follows));
+            folder.file(`github_repositories_${username}.csv`, convertToCSV(data.repos));
+            folder.file(`github_gists_${username}.csv`, convertToCSV(data.gists));
+            folder.file(`github_starredgists_${username}.csv`, convertToCSV(data.starredGists));
+
+            zip.generateAsync({ type: 'blob' }).then(function (content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `github_data_${username}.zip`;
+                link.click();
+            });
+        }
+
+        function showMessage(message, type) {
+            const messageElement = document.getElementById('message');
+            messageElement.textContent = message;
+            messageElement.className = type;
+            messageElement.style.display = 'block';
+
+            // Hide other messages
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        document.getElementById('getDataButton').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            const token = document.getElementById('token').value;
+
+            if (username && token) {
+                await fetchGitHubData(username, token);
+            } else {
+                showMessage('Please enter both GitHub username and token.', 'error');
+            }
+        });
+
+        document.getElementById('downloadCsvButton').addEventListener('click', () => {
+            const { stars, follows, following, repos, gists, starredGists, username } = window.githubData;
+            downloadZIP({ stars, follows, following, repos, gists, starredGists }, username);
+        });
+
+        document.getElementById('resetButton').addEventListener('click', () => {
+            document.getElementById('username').value = '';
+            document.getElementById('token').value = '';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('message').style.display = 'none';
+            document.getElementById('downloadCsvButton').style.display = 'none';
+            document.getElementById('getDataButton').disabled = false;
+        });
+    </script>
+
+</body>
+</html>
